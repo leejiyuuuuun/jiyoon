@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Memo App</title>
+</head>
+<body>
+  <h1>Memo App</h1>
+
+  <form id="memoForm">
+    <input type="text" id="titleInput" name="title" placeholder="메모 제목" required> <br>
+    <textarea id="contentInput" name="content" placeholder="메모 내용" required></textarea>
+    <button type="submit">메모 추가</button>
+  </form>
+
+  <h2>메모 목록</h2>
+  <ul id="memoList"></ul>
+
+  <script>
+    // 웹 소켓 연결
+    const socket = new WebSocket('ws://localhost:3001');
+
+    // 연결이 성공적으로 이루어졌을 때 이벤트 처리
+    socket.addEventListener('open', (event) => {
+      console.log('WebSocket 연결 성공');
+    });
+
+    // 서버로부터 메모 추가 알림 수신
+    socket.addEventListener('message', (event) => {
+      const memo = JSON.parse(event.data);
+      alert(`새로운 메모가 추가되었습니다!\n제목: ${memo.title}\n내용: ${memo.content}`);
+    });
+
+    // 메모 추가, 조회, 수정, 삭제
+    const memoForm = document.querySelector('#memoForm');
+    const memoList = document.querySelector('#memoList');
+
+    function addMemoToList(memo) {
+      const memoItem = document.createElement('li');
+      memoItem.innerHTML = `
+        <strong>${memo.title}</strong>
+        <p>${memo.content}</p>
+        <button class="editButton" data-id="${memo.id}">수정</button>
+        <button class="deleteButton" data-id="${memo.id}">삭제</button>
+      `;
+      memoList.appendChild(memoItem);
+    }
+
+    memoForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      const titleInput = document.querySelector('#titleInput');
+      const contentInput = document.querySelector('#contentInput');
+
+      const title = titleInput.value;
+      const content = contentInput.value;
+
+      fetch('/api/memos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title, content }),
+      })
+        .then((response) => response.json())
+        .then((memo) => {
+          addMemoToList(memo);
+          titleInput.value = '';
+          contentInput.value = '';
+          // 웹 소켓을 통해 메모 추가 이벤트 전송
+          socket.send(JSON.stringify({ type: 'addMemo', memo }));
+        })
+        .catch((error) => {
+          console.error('Error:', error);
+        });
+    });
+
+    // 메모 목록 조회
+    fetch('/api/memos')
+      .then((response) => response.json())
+      .then((data) => {
+        data.forEach((memo) => {
+          addMemoToList(memo);
+        });
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+      });
+
+    // 수정 버튼 클릭 시 이벤트 처리
+memoList.addEventListener('click', (event) => {
+  if (event.target.classList.contains('editButton')) {
+    const memoId = event.target.dataset.id;
+    const memoItem = event.target.parentElement;
+    const titleElement = memoItem.querySelector('strong');
+    const contentElement = memoItem.querySelector('p');
+
+    // 수정 폼 생성
+    const editForm = document.createElement('form');
+    const titleInput = document.createElement('input');
+    const contentInput = document.createElement('textarea');
+    const submitButton = document.createElement('button');
+
+    titleInput.value = titleElement.textContent;
+    contentInput.value = contentElement.textContent;
+
+    submitButton.textContent = '수정';
+    editForm.appendChild(titleInput);
+    editForm.appendChild(document.createElement('br')); // 줄바꿈을 위한 <br> 요소 추가
+    editForm.appendChild(contentInput);
+    editForm.appendChild(submitButton);
+    memoItem.appendChild(editForm);
+
+    // 수정 폼 제출 이벤트 처리
+    editForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      const newTitle = titleInput.value;
+      const newContent = contentInput.value;
+
+      if (newTitle && newContent) {
+        const updatedMemo = { id: memoId, title: newTitle, content: newContent };
+
+        fetch(`/api/memos/${memoId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updatedMemo),
+        })
+          .then((response) => response.json())
+          .then((memo) => {
+            // 웹 소켓을 통해 메모 수정 이벤트 전송
+            socket.send(JSON.stringify({ type: 'editMemo', memo }));
+            titleElement.textContent = memo.title;
+            contentElement.textContent = memo.content;
+
+            // 수정 폼 제거
+            editForm.remove();
+          })
+          .catch((error) => {
+            console.error('Error:', error);
+          });
+      }
+    });
+  }
+});
+
+
+    // 삭제 버튼 클릭 시 이벤트 처리
+    memoList.addEventListener('click', (event) => {
+      if (event.target.classList.contains('deleteButton')) {
+        const memoId = event.target.dataset.id;
+        const memoItem = event.target.parentElement;
+
+        fetch(`/api/memos/${memoId}`, {
+          method: 'DELETE',
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            // 웹 소켓을 통해 메모 삭제 이벤트 전송
+            socket.send(JSON.stringify({ type: 'deleteMemo', memoId }));
+            memoItem.remove();
+          })
+          .catch((error) => {
+            console.error('Error:', error);
+          });
+      }
+    });
+  </script>
+</body>
+</html>
